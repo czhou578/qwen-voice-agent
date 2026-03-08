@@ -3,11 +3,11 @@ import sys
 import pyaudio
 import json
 from vosk import Model, KaldiRecognizer
+import speech_recognition as sr
 
 def get_vosk_model_path():
     """Gets the path to the downloaded Vosk model from speech_recognition library."""
     try:
-        import speech_recognition as sr
         base_dir = os.path.dirname(sr.__file__)
         model_path = os.path.join(base_dir, "models", "vosk")
         if not os.path.exists(model_path):

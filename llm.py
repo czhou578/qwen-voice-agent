@@ -14,10 +14,17 @@ If the user asks you to search the web or look something up on Google, you MUST 
 If the user asks you to search specifically on YouTube, you MUST reply ONLY with the exact format:
 [YOUTUBE] query here
 
+If the user asks you to pause, play, replay, or restart the currently playing YouTube video, you MUST reply ONLY with the exact format:
+[YOUTUBE_REPLAY]
+
 If the user asks you to navigate to, go to, or open a specific website or URL, you MUST reply ONLY with the exact format:
 [NAVIGATE] example.com
 
-For all other general questions or conversation, answer verbally in 1-2 short, natural sentences without abbreviations. Do not use emojis, lists, or code formatting."""
+For all other general questions or conversation, answer verbally in 1-2 short, natural sentences without abbreviations. 
+
+IMPORTANT RULE: When you output a command like [SEARCH] or [YOUTUBE], you MUST NOT output any other conversational text. Output literally ONLY the command. Do NOT say "Okay" or "I will search." """
+
+chat_history = []
 
 try:
     client = OpenAI(base_url=API_BASE, api_key=API_KEY)
@@ -40,17 +47,21 @@ def prewarm_llm():
         print(f"[System] LLM wake-up failed: {e}")
 
 def query_llm_stream(prompt):
-    """Sends the prompt to LLM, streams the response, and chunks it into sentences for immediate playback."""
+    """Sends the prompt to LLM with history, streams response, and chunks into sentences for playback."""
+    global chat_history
     if not client: return ""
     print(f"\n[Thinking...] Sending to {API_BASE}")
     start_time = time.time()
+    
+    # Construct messages with system prompt, history, and current prompt
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages.extend(chat_history)
+    messages.append({"role": "user", "content": prompt})
+    
     try:
         response = client.chat.completions.create(
             model=MODEL_NAME,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt}
-            ],
+            messages=messages,
             temperature=0.7,
             max_tokens=150,
             stream=True
@@ -71,8 +82,8 @@ def query_llm_stream(prompt):
                 sentence_buffer += word
                 full_response += word
                 
-                # If first character is [, this is a command. We don't speak anything yet, let it buffer fully.
-                if full_response.strip().startswith("["):
+                # If response contains a [, it's likely a command sequence. Suppress speech immediately.
+                if "[" in full_response:
                     continue
                 
                 # Simple sentence boundary detection
@@ -82,10 +93,18 @@ def query_llm_stream(prompt):
                         sentence_buffer = ""
                         
         # Flush remaining text if it wasn't a command
-        if sentence_buffer.strip() and not full_response.strip().startswith("["):
+        if sentence_buffer.strip() and "[" not in full_response:
             speak(sentence_buffer.strip())
             
-        return full_response.strip()
+        full_response_clean = full_response.strip()
+        
+        # Save to history (keep last 10 interactions to avoid token overflow)
+        chat_history.append({"role": "user", "content": prompt})
+        chat_history.append({"role": "assistant", "content": full_response_clean})
+        if len(chat_history) > 20:
+            chat_history = chat_history[-20:]
+            
+        return full_response_clean
     except Exception as e:
         print(f"\n[Error] LLM request failed: {e}")
         speak("I'm sorry, I couldn't connect to my brain.")

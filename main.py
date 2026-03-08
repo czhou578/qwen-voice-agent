@@ -54,7 +54,11 @@ def main():
             llm_response = query_llm_stream(text)
             
             # Check for Browser Commands
-            if "[YOUTUBE]" in llm_response:
+            if "[YOUTUBE_REPLAY]" in llm_response:
+                speak("Okay, restarting the video.")
+                browser_tools.replay_youtube()
+                
+            elif "[YOUTUBE]" in llm_response:
                 query = llm_response.replace("[YOUTUBE]", "").strip()
                 speak(f"Okay, pulling up {query} on YouTube.")
                 browser_tools.search_youtube(query)
