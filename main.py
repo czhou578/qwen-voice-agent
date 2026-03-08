@@ -1,12 +1,20 @@
 import os
-import time
-import speech_recognition as sr
-import pyttsx3
-import json
-import browser_tools
 import sys
+import time
+import json
+import queue
+import threading
+import pyttsx3
+import pyaudio
+from vosk import Model, KaldiRecognizer
 from openai import OpenAI
 from dotenv import load_dotenv
+
+# can pause and replay youtube videos on command
+# add emotion 
+# improve latency
+# find better tts module
+# modularize the code so that a pipeline can be created for different models
 
 # Load environment variables
 load_dotenv()
@@ -29,19 +37,64 @@ For all other general questions or conversation, answer verbally in 1-2 short, n
 # Initialize OpenAI Client (connecting to local LLM server)
 client = OpenAI(base_url=API_BASE, api_key=API_KEY)
 
-# Initialize TTS Engine
-tts_engine = pyttsx3.init()
-# Configure preferred voice properties (can adjust rate/volume as needed)
-tts_engine.setProperty('rate', 160)
+# Initialize Background TTS Queue
+tts_queue = queue.Queue()
+
+def tts_worker():
+    """Background thread for continuous Text-to-Speech processing."""
+    PIPER_MODEL_PATH = "en_US-lessac-medium.onnx"
+    use_piper = False
+    
+    try:
+        if os.path.exists(PIPER_MODEL_PATH):
+            from piper.voice import PiperVoice
+            piper_engine = PiperVoice.load(PIPER_MODEL_PATH)
+            piper_sample_rate = piper_engine.config.sample_rate
+            use_piper = True
+            print("[System] Loaded Piper TTS Model.")
+        else:
+            raise FileNotFoundError("Piper model not found locally.")
+    except Exception as e:
+        print(f"[System] Piper error fallback to pyttsx3: {e}")
+        # We must initialize pyttsx3 inside the thread loop for safety in some OS environments
+        tts_engine = pyttsx3.init()
+        tts_engine.setProperty('rate', 160)
+        
+    while True:
+        text = tts_queue.get()
+        if text is None:
+            break
+            
+        print(f"\n[Qwen] {text}")
+        
+        if use_piper:
+            try:
+                import sounddevice as sd
+                import numpy as np
+                stream = sd.OutputStream(samplerate=piper_sample_rate, channels=1, dtype='int16')
+                stream.start()
+                for chunk in piper_engine.synthesize(text):
+                    stream.write(chunk.audio_int16_array)
+                stream.stop()
+                stream.close()
+            except Exception as e:
+                print(f"[System] Piper playback failed: {e}")
+        else:
+            tts_engine.say(text)
+            tts_engine.runAndWait()
+            
+        tts_queue.task_done()
+
+# Start TTS background thread
+tts_thread = threading.Thread(target=tts_worker, daemon=True)
+tts_thread.start()
 
 def speak(text):
-    """Speaks the text out loud using pyttsx3."""
-    print(f"\n[Qwen] {text}")
-    tts_engine.say(text)
-    tts_engine.runAndWait()
+    """Puts text into the TTS queue to be spoken immediately."""
+    tts_queue.put(text)
 
-def query_llm(prompt):
-    """Sends the user prompt to the local Qwen model and returns the response."""
+def query_llm_stream(prompt):
+    """Sends the prompt to LLM, streams the response, and chunks it into sentences for immediate playback."""
     print(f"\n[Thinking...] Sending to {API_BASE}")
     try:
         response = client.chat.completions.create(
@@ -51,90 +104,133 @@ def query_llm(prompt):
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
-            max_tokens=150
+            max_tokens=150,
+            stream=True
         )
-        return response.choices[0].message.content.strip()
+        
+        sentence_buffer = ""
+        full_response = ""
+        
+        for chunk in response:
+            if chunk.choices and chunk.choices[0].delta.content:
+                word = chunk.choices[0].delta.content
+                sentence_buffer += word
+                full_response += word
+                
+                # If first character is [, this is a command. We don't speak anything yet, let it buffer fully.
+                if full_response.strip().startswith("["):
+                    continue
+                
+                # Simple sentence boundary detection
+                if any(punct in word for punct in ['.', '!', '?']):
+                    if sentence_buffer.strip():
+                        speak(sentence_buffer.strip())
+                        sentence_buffer = ""
+                        
+        # Flush remaining text if it wasn't a command
+        if sentence_buffer.strip() and not full_response.strip().startswith("["):
+            speak(sentence_buffer.strip())
+            
+        return full_response.strip()
     except Exception as e:
         print(f"\n[Error] LLM request failed: {e}")
-        return "I'm sorry, I couldn't connect to my brain. Is the local LLM running?"
+        speak("I'm sorry, I couldn't connect to my brain.")
+        return ""
+
+def get_vosk_model_path():
+    """Gets the path to the downloaded Vosk model from speech_recognition library."""
+    import speech_recognition as sr
+    base_dir = os.path.dirname(sr.__file__)
+    model_path = os.path.join(base_dir, "models", "vosk")
+    if not os.path.exists(model_path):
+        print(f"Error: Vosk model not found at {model_path}.")
+        print("Please run: sprc download vosk")
+        sys.exit(1)
+    return model_path
 
 def main():
     print("="*50)
-    print(" Voice Agent Initializing...")
+    print(" Voice Agent Initializing (Low-Latency Mode)...")
     print(f" LLM Endpoint: {API_BASE}")
     print(f" Model Name: {MODEL_NAME}")
     print("="*50)
+    
+    print("\n[System] Loading Vosk STT Model...")
+    model_path = get_vosk_model_path()
+    model = Model(model_path)
+    # 16000Hz mono is required by Vosk
+    recognizer = KaldiRecognizer(model, 16000)
+    
     print("\n[System] Initializing Microphone...")
+    audio = pyaudio.PyAudio()
+    stream = audio.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, frames_per_buffer=4000)
+    stream.start_stream()
     
-    r = sr.Recognizer()
-    # Wait for a longer pause before considering the phrase complete
-    r.pause_threshold = 1.5
-    mic = sr.Microphone()
-    
-    # Adjust for ambient noise briefly
-    with mic as source:
-        r.adjust_for_ambient_noise(source, duration=1)
-        
     speak("I am ready!")
+    # Wait for the initial "I am ready!" to finish speaking
+    tts_queue.join()
+    
+    print("\n[Listening...] (Say 'exit' to quit)")
     
     while True:
         try:
-            with mic as source:
-                print("\n[Listening...] (Say 'exit' to quit)")
-                # listen() blocks until a phrase starts and finishes
-                audio = r.listen(source, timeout=None, phrase_time_limit=10)
-                
-            print("\n[Recognizing...]")
-            # Using Vosk offline STT
-            # The first time this runs, it will download a ~40MB Vosk model to your PC
-            text = r.recognize_vosk(audio)
+            # Read small chunks of audio (latency optimization)
+            data = stream.read(4000, exception_on_overflow=False)
             
-            if not text or not text.strip():
-                continue
+            # AcceptWaveform returns True when a silence boundary is detected, marking phrase completion
+            if recognizer.AcceptWaveform(data):
+                result = json.loads(recognizer.Result())
+                text = result.get("text", "")
                 
-            print(f"\n[You] {text}")
-            
-            # Simple exit command
-            if text.lower() in ["exit", "quit", "stop listening", "goodbye"]:
-                speak("Goodbye! Shutting down.")
-                break
+                if not text or not text.strip():
+                    continue
+                    
+                print(f"\n[You] {text}")
                 
-            # Query Model
-            llm_response = query_llm(text)
-            
-            # Check for Browser Commands
-            if "[YOUTUBE]" in llm_response:
-                query = llm_response.replace("[YOUTUBE]", "").strip()
-                speak(f"Okay, pulling up {query} on YouTube.")
-                import browser_tools
-                browser_tools.search_youtube(query)
-                continue
+                # Simple exit command
+                if text.lower() in ["exit", "quit", "stop listening", "goodbye"]:
+                    speak("Goodbye! Shutting down.")
+                    tts_queue.join()
+                    break
+                
+                # Pause mic stream while processing and speaking to avoid hearing itself
+                stream.stop_stream()
+                
+                # Query Model (Streams instantly to TTS)
+                llm_response = query_llm_stream(text)
+                
+                # Check for Browser Commands (Since we suppressed TTS via full_response.startswith("["))
+                if "[YOUTUBE]" in llm_response:
+                    query = llm_response.replace("[YOUTUBE]", "").strip()
+                    speak(f"Okay, pulling up {query} on YouTube.")
+                    import browser_tools
+                    browser_tools.search_youtube(query)
 
-            if "[SEARCH]" in llm_response:
-                query = llm_response.replace("[SEARCH]", "").strip()
-                speak(f"Okay, I am searching Google for {query}")
-                import browser_tools
-                browser_tools.search_google(query)
-                continue
+                elif "[SEARCH]" in llm_response:
+                    query = llm_response.replace("[SEARCH]", "").strip()
+                    speak(f"Okay, I am searching Google for {query}")
+                    import browser_tools
+                    browser_tools.search_google(query)
+                    
+                elif "[NAVIGATE]" in llm_response:
+                    url = llm_response.replace("[NAVIGATE]", "").strip()
+                    speak(f"Okay, I am opening {url}")
+                    import browser_tools
+                    browser_tools.navigate_to(url)
                 
-            if "[NAVIGATE]" in llm_response:
-                url = llm_response.replace("[NAVIGATE]", "").strip()
-                speak(f"Okay, I am opening {url}")
-                import browser_tools
-                browser_tools.navigate_to(url)
-                continue
-            
-            # Speak Verbal Response
-            speak(llm_response)
-            
-        except sr.UnknownValueError:
-            print("\n[System] Could not understand audio.")
-        except sr.WaitTimeoutError:
-            pass
-        except sr.RequestError as e:
-            print(f"\n[System] Recognition request failed: {e}")
+                # Wait for TTS to finish speaking the entire response before listening again
+                tts_queue.join()
+                
+                # Clear out any stale audio that arrived before we paused the stream
+                recognizer.Reset()
+                
+                # Restart listening
+                stream.start_stream()
+                print("\n[Listening...] (Say 'exit' to quit)")
+                
         except KeyboardInterrupt:
             print("\n[System] Stopping...")
+            import browser_tools
             try:
                 browser_tools.cleanup()
             except:
