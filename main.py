@@ -18,6 +18,9 @@ SYSTEM_PROMPT = """You are a helpful voice assistant named Qwen.
 If the user asks you to search the web or look something up on Google, you MUST reply ONLY with the exact format:
 [SEARCH] query here
 
+If the user asks you to search specifically on YouTube, you MUST reply ONLY with the exact format:
+[YOUTUBE] query here
+
 If the user asks you to navigate to, go to, or open a specific website or URL, you MUST reply ONLY with the exact format:
 [NAVIGATE] example.com
 
@@ -100,6 +103,13 @@ def main():
             llm_response = query_llm(text)
             
             # Check for Browser Commands
+            if "[YOUTUBE]" in llm_response:
+                query = llm_response.replace("[YOUTUBE]", "").strip()
+                speak(f"Okay, pulling up {query} on YouTube.")
+                import browser_tools
+                browser_tools.search_youtube(query)
+                continue
+
             if "[SEARCH]" in llm_response:
                 query = llm_response.replace("[SEARCH]", "").strip()
                 speak(f"Okay, I am searching Google for {query}")
