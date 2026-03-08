@@ -2,6 +2,7 @@ import os
 import time
 import speech_recognition as sr
 import pyttsx3
+import json
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -72,8 +73,13 @@ def main():
                 audio = r.listen(source, timeout=None, phrase_time_limit=10)
                 
             print("\n[Recognizing...]")
-            # Using Google's free Web Speech API for quick testing
-            text = r.recognize_google(audio)
+            # Using Vosk offline STT
+            # The first time this runs, it will download a ~40MB Vosk model to your PC
+            text = r.recognize_vosk(audio)
+            
+            if not text or not text.strip():
+                continue
+                
             print(f"\n[You] {text}")
             
             # Simple exit command
