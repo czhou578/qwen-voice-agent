@@ -96,6 +96,7 @@ def speak(text):
 def query_llm_stream(prompt):
     """Sends the prompt to LLM, streams the response, and chunks it into sentences for immediate playback."""
     print(f"\n[Thinking...] Sending to {API_BASE}")
+    start_time = time.time()
     try:
         response = client.chat.completions.create(
             model=MODEL_NAME,
@@ -110,9 +111,15 @@ def query_llm_stream(prompt):
         
         sentence_buffer = ""
         full_response = ""
+        got_first_token = False
         
         for chunk in response:
             if chunk.choices and chunk.choices[0].delta.content:
+                if not got_first_token:
+                    ttft = time.time() - start_time
+                    print(f"\n[Telemetry] Time to First Token (TTFT): {ttft:.2f} seconds")
+                    got_first_token = True
+                    
                 word = chunk.choices[0].delta.content
                 sentence_buffer += word
                 full_response += word
@@ -136,6 +143,19 @@ def query_llm_stream(prompt):
         print(f"\n[Error] LLM request failed: {e}")
         speak("I'm sorry, I couldn't connect to my brain.")
         return ""
+
+def prewarm_llm():
+    """Sends a silent request to the LLM to force it into VRAM before the user speaks."""
+    print(f"\n[System] Waking up LLM ({MODEL_NAME}) into VRAM...")
+    try:
+        client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": "wake up"}],
+            max_tokens=1
+        )
+        print("[System] LLM is fully loaded and ready.")
+    except Exception as e:
+        print(f"[System] LLM wake-up failed: {e}")
 
 def get_vosk_model_path():
     """Gets the path to the downloaded Vosk model from speech_recognition library."""
@@ -164,6 +184,10 @@ def main():
     print("\n[System] Initializing Microphone...")
     audio = pyaudio.PyAudio()
     stream = audio.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, frames_per_buffer=4000)
+    
+    # Pre-warm the LLM so the first query has zero cold-start delay
+    prewarm_llm()
+    
     stream.start_stream()
     
     speak("I am ready!")
