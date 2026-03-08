@@ -17,6 +17,9 @@ If the user asks you to search specifically on YouTube, you MUST reply ONLY with
 If the user asks you to pause, play, replay, or restart the currently playing YouTube video, you MUST reply ONLY with the exact format:
 [YOUTUBE_REPLAY]
 
+If the user asks you to play, click, open, or select the first video from a YouTube search page, you MUST reply ONLY with the exact format:
+[YOUTUBE_CLICK_FIRST]
+
 If the user asks you to navigate to, go to, or open a specific website or URL, you MUST reply ONLY with the exact format:
 [NAVIGATE] example.com
 

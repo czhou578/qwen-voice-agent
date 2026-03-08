@@ -157,6 +157,29 @@ def replay_youtube():
         print("[Browser Error] CDP not connected. Cannot interact with the YouTube player.")
         return "I can only replay videos if you launch your browser with the debugging port enabled."
 
+def click_first_youtube_result():
+    """Clicks the first video in the YouTube search results."""
+    print("[Browser Tools] Clicking first YouTube result")
+    page = _manager.get_page()
+    
+    if page:
+        try:
+            if "youtube.com/results" not in page.url:
+                print("[Browser Error] Not currently on a YouTube search page.")
+                return "I must be on a YouTube search page to do this."
+                
+            # Click the first video thumbnail
+            first_video = page.locator("ytd-video-renderer a#thumbnail").first
+            first_video.click()
+            page.wait_for_load_state("networkidle", timeout=5000)
+            return "Successfully clicked the first YouTube video."
+        except Exception as e:
+            print(f"[Browser Error] {e}")
+            return "Sorry, I failed to click the first YouTube video."
+    else:
+        print("[Browser Error] CDP not connected.")
+        return "I can only click videos if you launch your browser with the debugging port enabled."
+
 def cleanup():
     """Called on exit to close the browser."""
     _manager.close()

@@ -58,6 +58,10 @@ def main():
                 speak("Okay, restarting the video.")
                 browser_tools.replay_youtube()
                 
+            elif "[YOUTUBE_CLICK_FIRST]" in llm_response:
+                speak("Okay, playing the first result.")
+                browser_tools.click_first_youtube_result()
+                
             elif "[YOUTUBE]" in llm_response:
                 query = llm_response.replace("[YOUTUBE]", "").strip()
                 speak(f"Okay, pulling up {query} on YouTube.")
