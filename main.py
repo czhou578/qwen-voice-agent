@@ -3,6 +3,8 @@ import time
 import speech_recognition as sr
 import pyttsx3
 import json
+import browser_tools
+import sys
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -12,7 +14,14 @@ load_dotenv()
 API_BASE = os.getenv("OPENAI_API_BASE", "http://localhost:8002/v1")
 API_KEY = os.getenv("OPENAI_API_KEY", "local")
 MODEL_NAME = os.getenv("MODEL_NAME", "qwen2.5:3b-instruct")
-SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "You are a helpful voice assistant. Answer in 1-2 short sentences.")
+SYSTEM_PROMPT = """You are a helpful voice assistant named Qwen. 
+If the user asks you to search the web or look something up on Google, you MUST reply ONLY with the exact format:
+[SEARCH] query here
+
+If the user asks you to navigate to, go to, or open a specific website or URL, you MUST reply ONLY with the exact format:
+[NAVIGATE] example.com
+
+For all other general questions or conversation, answer verbally in 1-2 short, natural sentences without abbreviations. Do not use emojis, lists, or code formatting."""
 
 # Initialize OpenAI Client (connecting to local LLM server)
 client = OpenAI(base_url=API_BASE, api_key=API_KEY)
@@ -63,7 +72,7 @@ def main():
     with mic as source:
         r.adjust_for_ambient_noise(source, duration=1)
         
-    speak("Initialization complete. I am ready. What is on your mind?")
+    speak("I am ready. What is on your mind?")
     
     while True:
         try:
@@ -90,7 +99,22 @@ def main():
             # Query Model
             llm_response = query_llm(text)
             
-            # Speak Response
+            # Check for Browser Commands
+            if "[SEARCH]" in llm_response:
+                query = llm_response.replace("[SEARCH]", "").strip()
+                speak(f"Okay, I am searching Google for {query}")
+                import browser_tools
+                browser_tools.search_google(query)
+                continue
+                
+            if "[NAVIGATE]" in llm_response:
+                url = llm_response.replace("[NAVIGATE]", "").strip()
+                speak(f"Okay, I am opening {url}")
+                import browser_tools
+                browser_tools.navigate_to(url)
+                continue
+            
+            # Speak Verbal Response
             speak(llm_response)
             
         except sr.UnknownValueError:
@@ -101,7 +125,11 @@ def main():
             print(f"\n[System] Recognition request failed: {e}")
         except KeyboardInterrupt:
             print("\n[System] Stopping...")
-            break
+            try:
+                browser_tools.cleanup()
+            except:
+                pass
+            sys.exit(0)
         except Exception as e:
             print(f"\n[System] An error occurred: {e}")
 
