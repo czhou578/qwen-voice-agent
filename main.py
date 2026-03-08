@@ -75,7 +75,7 @@ def main():
     with mic as source:
         r.adjust_for_ambient_noise(source, duration=1)
         
-    speak("I am ready. What is on your mind?")
+    speak("I am ready!")
     
     while True:
         try:
