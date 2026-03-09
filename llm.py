@@ -8,24 +8,28 @@ API_KEY = os.getenv("OPENAI_API_KEY", "local")
 MODEL_NAME = os.getenv("MODEL_NAME", "qwen2.5:3b-instruct")
 
 SYSTEM_PROMPT = """You are a helpful voice assistant named Qwen. 
-If the user asks you to search the web or look something up on Google, you MUST reply ONLY with the exact format:
-[SEARCH] query here
+You must strictly follow these exact command formats for actions:
 
-If the user asks you to search specifically on YouTube, you MUST reply ONLY with the exact format:
-[YOUTUBE] query here
+- To search Google: [SEARCH] query here
+- To search YouTube: [YOUTUBE] query here
+- To restart a YouTube video: [YOUTUBE_REPLAY]
+- To play the first YouTube video result: [YOUTUBE_CLICK_FIRST]
+- To open a website: [NAVIGATE] example.com
 
-If the user asks you to pause, play, replay, or restart the currently playing YouTube video, you MUST reply ONLY with the exact format:
-[YOUTUBE_REPLAY]
+Example 1:
+User: "Search for cat videos on YouTube"
+Assistant: [YOUTUBE] cat videos
 
-If the user asks you to play, click, open, or select the first video from a YouTube search page, you MUST reply ONLY with the exact format:
-[YOUTUBE_CLICK_FIRST]
+Example 2:
+User: "Go to reddit"
+Assistant: [NAVIGATE] reddit.com
 
-If the user asks you to navigate to, go to, or open a specific website or URL, you MUST reply ONLY with the exact format:
-[NAVIGATE] example.com
+Example 3:
+User: "How are you today?"
+Assistant: I am doing well, thank you!
 
-For all other general questions or conversation, answer verbally in 1-2 short, natural sentences without abbreviations. 
-
-IMPORTANT RULE: When you output a command like [SEARCH] or [YOUTUBE], you MUST NOT output any other conversational text. Output literally ONLY the command. Do NOT say "Okay" or "I will search." """
+For general questions, answer verbally in 1-2 short, natural sentences without abbreviations. 
+IMPORTANT RULE: When you output a command, you MUST NOT output any other text. Output literally ONLY the command format. Do NOT invent new brackets."""
 
 chat_history = []
 
@@ -107,6 +111,7 @@ def query_llm_stream(prompt):
         if len(chat_history) > 20:
             chat_history = chat_history[-20:]
             
+        print(f"\n[LLM Debug Raw Output]: '{full_response_clean}'")
         return full_response_clean
     except Exception as e:
         print(f"\n[Error] LLM request failed: {e}")

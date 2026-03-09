@@ -72,6 +72,13 @@ def search_google(query: str):
         try:
             page.goto("https://www.google.com")
             search_box = page.locator("textarea[name='q'], input[name='q']").first
+            search_box.wait_for(state="visible", timeout=5000)
+            try:
+                elem_html = search_box.evaluate("el => el.outerHTML")
+                print(f"[Browser Tools Debug] Selected Element: {elem_html[:200]}...")
+            except Exception as e:
+                print(f"[Browser Tools Debug] Could not fetch element HTML: {e}")
+                
             search_box.fill(query)
             search_box.press("Enter")
             page.wait_for_load_state("networkidle", timeout=5000)
@@ -107,8 +114,12 @@ def navigate_to(url: str):
         webbrowser.open(url)
         return f"Successfully navigated to {url} natively."
 
+last_youtube_query = ""
+
 def search_youtube(query: str):
     """Navigates to YouTube and searches the query."""
+    global last_youtube_query
+    last_youtube_query = query
     print(f"[Browser Tools] Searching YouTube for: {query}")
     page = _manager.get_page()
     
@@ -117,6 +128,12 @@ def search_youtube(query: str):
             page.goto("https://www.youtube.com")
             search_box = page.locator("input[name='search_query']").first
             search_box.wait_for(state="visible", timeout=10000)
+            try:
+                elem_html = search_box.evaluate("el => el.outerHTML")
+                print(f"[Browser Tools Debug] Selected Element: {elem_html[:200]}...")
+            except Exception as e:
+                print(f"[Browser Tools Debug] Could not fetch element HTML: {e}")
+                
             search_box.fill(query)
             search_box.press("Enter")
             page.wait_for_load_state("networkidle", timeout=5000)
@@ -142,13 +159,21 @@ def replay_youtube():
                 print("[Browser Error] Not currently watching a YouTube video.")
                 return "Sorry, I am not currently on a YouTube video page."
                 
-            page.evaluate("""
-                const video = document.querySelector('video');
-                if (video) {
-                    video.currentTime = 0;
-                    video.play();
+            video_html = page.evaluate("""
+                () => {
+                    const video = document.querySelector('video');
+                    if (video) {
+                        video.currentTime = 0;
+                        video.play();
+                        return video.outerHTML.substring(0, 200);
+                    }
+                    return null;
                 }
             """)
+            if video_html:
+                print(f"[Browser Tools Debug] Selected Element: {video_html}...")
+            else:
+                print("[Browser Tools Debug] Could not find video element.")
             return "Successfully restarted the YouTube video."
         except Exception as e:
             print(f"[Browser Error] {e}")
@@ -170,6 +195,13 @@ def click_first_youtube_result():
                 
             # Click the first video thumbnail
             first_video = page.locator("ytd-video-renderer a#thumbnail").first
+            first_video.wait_for(state="visible", timeout=10000)
+            try:
+                elem_html = first_video.evaluate("el => el.outerHTML")
+                print(f"[Browser Tools Debug] Selected Element: {elem_html[:200]}...")
+            except Exception as e:
+                print(f"[Browser Tools Debug] Could not fetch element HTML: {e}")
+                
             first_video.click()
             page.wait_for_load_state("networkidle", timeout=5000)
             return "Successfully clicked the first YouTube video."
@@ -177,8 +209,38 @@ def click_first_youtube_result():
             print(f"[Browser Error] {e}")
             return "Sorry, I failed to click the first YouTube video."
     else:
-        print("[Browser Error] CDP not connected.")
-        return "I can only click videos if you launch your browser with the debugging port enabled."
+        print("[Browser Error] CDP not connected. Attempting headless URL fetch fallback...")
+        if not last_youtube_query:
+            return "I don't know what you searched for last."
+            
+        try:
+            import subprocess
+            import sys
+            print(f"[Browser Tools] Scraping top result for: {last_youtube_query}")
+            
+            # Run the detached script so Playwright doesn't clash with the active async loop
+            # Use sys.executable to ensure we use the venv python and don't get a ModuleNotFoundError
+            result = subprocess.run(
+                [sys.executable, "fetch_youtube.py", last_youtube_query],
+                capture_output=True,
+                text=True,
+                timeout=15
+            )
+            
+            output = result.stdout.strip()
+            
+            if "SUCCESS:" in output:
+                video_url = output.split("SUCCESS:")[1].strip()
+                webbrowser.open(video_url)
+                return "Successfully opened the first YouTube video."
+            else:
+                print(f"[Browser Tools Debug] Script output: {output}")
+                print(f"[Browser Tools Debug] Script errors: {result.stderr}")
+                return "Failed to extract the video URL."
+                
+        except Exception as e:
+            print(f"[Browser Tools Debug] Headless fetch failed: {e}")
+            return "Sorry, I couldn't find the top result natively."
 
 def cleanup():
     """Called on exit to close the browser."""

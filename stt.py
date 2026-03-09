@@ -13,7 +13,13 @@ class STTManager:
         print("[System] Initializing Microphone...")
         self.recognizer = sr.Recognizer()
         self.recognizer.energy_threshold = 300  # Adjust if it's too sensitive or not sensitive enough
-        self.recognizer.dynamic_energy_threshold = True
+        self.recognizer.dynamic_energy_threshold = False
+        
+        # Increase pause threshold so it doesn't aggressively cut off the end of your sentence
+        # if you pause slightly before saying "YouTube"
+        self.recognizer.pause_threshold = 1.5
+        self.recognizer.non_speaking_duration = 0.5
+        
         self.microphone = sr.Microphone(sample_rate=16000)
         
         # Adjust for ambient noise once on startup
@@ -50,7 +56,7 @@ class STTManager:
                     audio_np = np.frombuffer(audio_data.get_raw_data(), dtype=np.int16).astype(np.float32) / 32768.0
                     
                     # Transcribe
-                    segments, _ = self.model.transcribe(audio_np, beam_size=5)
+                    segments, _ = self.model.transcribe(audio_np, beam_size=5, condition_on_previous_text=False)
                     
                     text = "".join([segment.text for segment in segments]).strip()
                     
